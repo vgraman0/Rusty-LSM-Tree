@@ -54,8 +54,46 @@ A single `MANIFEST` file must track the "Active Set" of SSTables.
 
 ## 5. Implementation Milestones
 
-* **Milestone 1: The In-Memory Store.** Implement a `SkipList` or `BTreeMap` MemTable with the `put/get` API. No persistence yet.
-* **Milestone 2: The WAL & Recovery.** Implement the WAL. Close the program, restart it, and prove the MemTable is rebuilt from the log.
-* **Milestone 3: SSTable Generation.** Implement the logic to "Freeze" a MemTable and write it to a sorted `.sst` file with a basic index.
-* **Milestone 4: Point Lookups.** Update `get()` to check the MemTable first, then the most recent SSTables in order.
-* **Milestone 5 (The "A" Grade): Compaction.** Implement a background thread that merges two Level-0 SSTables into a single Level-1 SSTable, removing old versions of keys.
+### Milestone 1: The In-Memory Store
+Implement a `SkipList` or `BTreeMap` MemTable with the `put/get` API. No persistence yet.
+
+| File | Struct / Trait | Key Methods |
+|------|---------------|-------------|
+| `src/memtable.rs` | `MemTable` (trait) | `put`, `get`, `delete`, `len`, `is_empty` |
+| `src/memtable.rs` | `SkipListMemTable` | `new`, `find_update_path`, `random_level` |
+| `src/error.rs` | `Error` enum | custom error types via `thiserror` |
+
+### Milestone 2: The WAL & Recovery
+Implement the WAL. Close the program, restart it, and prove the MemTable is rebuilt from the log.
+
+| File | Struct / Trait | Key Methods |
+|------|---------------|-------------|
+| `src/wal.rs` | `Wal` | `create`, `open`, `append`, `recover`, `sync` |
+| `src/db.rs` | `DB` | `open` (replay WAL → MemTable), `put`, `delete` (WAL + MemTable writes) |
+
+### Milestone 3: SSTable Generation
+Implement the logic to "Freeze" a MemTable and write it to a sorted `.sst` file with a basic index.
+
+| File | Struct / Trait | Key Methods |
+|------|---------------|-------------|
+| `src/sstable/builder.rs` | `SSTableBuilder` | `new`, `add`, `finish` |
+| `src/bloom.rs` | `BloomFilter` | `new`, `insert`, `may_contain`, `encode`, `decode` |
+| `src/manifest.rs` | `Manifest` | `create`, `load`, `add_sstable`, `active_sstables` |
+| `src/db.rs` | `DB` | flush logic (freeze MemTable → SSTableBuilder → new WAL) |
+
+### Milestone 4: Point Lookups & Range Scans
+Update `get()` to check the MemTable first, then the most recent SSTables in order.
+
+| File | Struct / Trait | Key Methods |
+|------|---------------|-------------|
+| `src/sstable/reader.rs` | `SSTableReader` | `open`, `get`, `scan`, `may_contain` |
+| `src/db.rs` | `DB` | `get` (MemTable → SSTables), `scan` (merge across all sources) |
+
+### Milestone 5 (The "A" Grade): Compaction
+Implement a background thread that merges two Level-0 SSTables into a single Level-1 SSTable, removing old versions of keys.
+
+| File | Struct / Trait | Key Methods |
+|------|---------------|-------------|
+| `src/compaction.rs` | `CompactionManager` | `new`, `start`, `stop` |
+| `src/manifest.rs` | `Manifest` | `remove_sstable` (cleanup after merge) |
+| `src/db.rs` | `DB` | integrate compaction lifecycle (start on open, stop on drop) |
