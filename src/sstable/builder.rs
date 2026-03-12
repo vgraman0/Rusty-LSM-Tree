@@ -1,55 +1,96 @@
-use std::path::Path;
+use std::io::Write;
+use std::{fs::File, path::Path};
 
+use super::{BLOCK_SIZE, SSTABLE_MAGIC};
+use crate::bloom::BloomFilter;
 use crate::error::Result;
 
 pub struct SSTableBuilder {
-    // TODO: fields needed:
-    //   - file: File (the .sst file being written)
-    //   - current_block: Vec<u8> (buffer for the current 4KB data block)
-    //   - index_entries: Vec<(Vec<u8>, u64)> (last key + byte offset for each completed block)
-    //   - bloom: BloomFilter (populated as keys are added)
-    //   - current_offset: u64 (tracks byte position in the file)
-    //   - entry_count: usize (for sizing the bloom filter, or pass to BloomFilter::new)
+    file: File,
+    current_block: Vec<u8>,
+    index_entries: Vec<(Vec<u8>, u64)>,
+    bloom: BloomFilter,
+    current_offset: u64,
+    entry_count: usize,
+    last_key: Vec<u8>,
 }
 
 impl SSTableBuilder {
-    pub fn new(path: &Path) -> Result<Self> {
-        // TODO:
-        //   1. Create/open the .sst file at path
-        //   2. Initialize an empty block buffer
-        //   3. Initialize empty index_entries
-        //   4. Create a new BloomFilter (estimate expected_items or use a reasonable default)
-        //   5. Set current_offset to 0
-        todo!()
+    pub fn new(path: &Path, expected_entries: usize) -> Result<Self> {
+        let file = File::create(path)?;
+        let current_block = Vec::new();
+        let index_entries = Vec::new();
+        let bloom = BloomFilter::new(expected_entries, 0.01);
+        let current_offset = 0;
+        let entry_count = 0;
+        let last_key = Vec::new();
+
+        Ok(SSTableBuilder {
+            file,
+            current_block,
+            index_entries,
+            bloom,
+            current_offset,
+            entry_count,
+            last_key,
+        })
     }
 
     pub fn add(&mut self, key: &[u8], value: Option<&[u8]>) -> Result<()> {
-        // TODO:
-        //   1. Insert the key into the bloom filter
-        //   2. Encode the entry into the current block buffer:
-        //      [key_len (u32 LE)] [key bytes] [value_len (u32 LE)] [value bytes]
-        //      For tombstones (value=None), use a sentinel like value_len = u32::MAX
-        //   3. If current_block.len() >= 4096 (4KB block size):
-        //      a. Write the block to the file
-        //      b. Record (last_key_in_block, block_start_offset) in index_entries
-        //      c. Update current_offset
-        //      d. Clear the block buffer
-        todo!()
+        self.bloom.insert(key);
+
+        let key_len = key.len() as u32;
+        self.current_block.extend_from_slice(&key_len.to_le_bytes());
+        self.current_block.extend_from_slice(key);
+        self.last_key = key.to_vec();
+        if let Some(v) = value {
+            let value_len = v.len() as u32;
+            self.current_block
+                .extend_from_slice(&value_len.to_le_bytes());
+            self.current_block.extend_from_slice(v);
+        } else {
+            let value_len = u32::MAX;
+            self.current_block
+                .extend_from_slice(&value_len.to_le_bytes());
+        }
+        self.entry_count += 1;
+
+        if self.current_block.len() >= BLOCK_SIZE {
+            let block_start = self.current_offset;
+            self.file.write_all(&self.current_block)?;
+            self.index_entries.push((key.to_vec(), block_start));
+            self.current_offset += self.current_block.len() as u64;
+            self.current_block.clear();
+        }
+
+        Ok(())
     }
 
-    pub fn finish(self) -> Result<()> {
-        // TODO:
-        //   1. Flush any remaining data in current_block as a final block
-        //      (record its index entry too)
-        //   2. Write the index block:
-        //      - Record the offset where the index block starts
-        //      - For each index entry: [key_len (u32 LE)] [key] [offset (u64 LE)]
-        //   3. Write the bloom filter:
-        //      - Record the offset where the bloom data starts
-        //      - Write bloom.encode()
-        //   4. Write a footer (fixed size, at the very end of the file):
-        //      [index_block_offset (u64 LE)] [bloom_offset (u64 LE)] [magic number]
-        //   5. Flush/sync the file
-        todo!()
+    pub fn finish(mut self) -> Result<()> {
+        if !self.current_block.is_empty() {
+            let block_start = self.current_offset;
+            self.file.write_all(&self.current_block)?;
+            self.index_entries.push((self.last_key, block_start));
+            self.current_offset += self.current_block.len() as u64;
+        }
+
+        let index_block_offset = self.current_offset;
+        for (key, offset) in &self.index_entries {
+            let key_len = key.len() as u32;
+            self.file.write_all(&key_len.to_le_bytes())?;
+            self.file.write_all(key)?;
+            self.file.write_all(&offset.to_le_bytes())?;
+
+            self.current_offset += 4 + key.len() as u64 + 8;
+        }
+
+        let bloom_offset = self.current_offset;
+        self.file.write_all(&self.bloom.encode())?;
+
+        self.file.write_all(&index_block_offset.to_le_bytes())?;
+        self.file.write_all(&bloom_offset.to_le_bytes())?;
+        self.file.write_all(&SSTABLE_MAGIC.to_le_bytes())?;
+
+        Ok(self.file.sync_all()?)
     }
 }
