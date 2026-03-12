@@ -119,3 +119,93 @@ fn is_empty_reflects_state() {
     table.delete(b"a");
     assert!(table.is_empty());
 }
+
+#[test]
+fn scan_returns_keys_in_range() {
+    let mut table = SkipListMemTable::new(4);
+    table.put(b"a".to_vec(), b"1".to_vec());
+    table.put(b"b".to_vec(), b"2".to_vec());
+    table.put(b"c".to_vec(), b"3".to_vec());
+    table.put(b"d".to_vec(), b"4".to_vec());
+    table.put(b"e".to_vec(), b"5".to_vec());
+
+    let result = table.scan(b"b", b"d");
+
+    assert_eq!(result.len(), 3);
+    assert_eq!(result[0], (b"b".as_slice(), b"2".as_slice()));
+    assert_eq!(result[1], (b"c".as_slice(), b"3".as_slice()));
+    assert_eq!(result[2], (b"d".as_slice(), b"4".as_slice()));
+}
+
+#[test]
+fn scan_full_range() {
+    let mut table = SkipListMemTable::new(4);
+    table.put(b"a".to_vec(), b"1".to_vec());
+    table.put(b"b".to_vec(), b"2".to_vec());
+    table.put(b"c".to_vec(), b"3".to_vec());
+
+    let result = table.scan(b"a", b"c");
+
+    assert_eq!(result.len(), 3);
+}
+
+#[test]
+fn scan_single_key() {
+    let mut table = SkipListMemTable::new(4);
+    table.put(b"a".to_vec(), b"1".to_vec());
+    table.put(b"b".to_vec(), b"2".to_vec());
+    table.put(b"c".to_vec(), b"3".to_vec());
+
+    let result = table.scan(b"b", b"b");
+
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0], (b"b".as_slice(), b"2".as_slice()));
+}
+
+#[test]
+fn scan_empty_table() {
+    let table = SkipListMemTable::new(4);
+
+    let result = table.scan(b"a", b"z");
+
+    assert!(result.is_empty());
+}
+
+#[test]
+fn scan_no_keys_in_range() {
+    let mut table = SkipListMemTable::new(4);
+    table.put(b"a".to_vec(), b"1".to_vec());
+    table.put(b"z".to_vec(), b"2".to_vec());
+
+    let result = table.scan(b"m", b"n");
+
+    assert!(result.is_empty());
+}
+
+#[test]
+fn scan_skips_tombstones() {
+    let mut table = SkipListMemTable::new(4);
+    table.put(b"a".to_vec(), b"1".to_vec());
+    table.put(b"b".to_vec(), b"2".to_vec());
+    table.put(b"c".to_vec(), b"3".to_vec());
+    table.delete(b"b");
+
+    let result = table.scan(b"a", b"c");
+
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0], (b"a".as_slice(), b"1".as_slice()));
+    assert_eq!(result[1], (b"c".as_slice(), b"3".as_slice()));
+}
+
+#[test]
+fn scan_range_beyond_existing_keys() {
+    let mut table = SkipListMemTable::new(4);
+    table.put(b"b".to_vec(), b"1".to_vec());
+    table.put(b"c".to_vec(), b"2".to_vec());
+
+    let result = table.scan(b"a", b"z");
+
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0], (b"b".as_slice(), b"1".as_slice()));
+    assert_eq!(result[1], (b"c".as_slice(), b"2".as_slice()));
+}

@@ -120,7 +120,23 @@ impl MemTable for SkipListMemTable {
         }
     }
 
-    fn scan(&self, start: &[u8], end: &[u8]) -> Vec<(&[u8], &[u8])> {}
+    fn scan(&self, start: &[u8], end: &[u8]) -> Vec<(&[u8], &[u8])> {
+        let mut entries = Vec::new();
+        let mut idx = self.nodes[self.head].forward[0];
+
+        while idx != NIL && self.nodes[idx].key.as_slice() < start {
+            idx = self.nodes[idx].forward[0];
+        }
+
+        while idx != NIL && self.nodes[idx].key.as_slice() <= end {
+            if let Some(val) = &self.nodes[idx].value {
+                entries.push((self.nodes[idx].key.as_slice(), val.as_slice()));
+            }
+            idx = self.nodes[idx].forward[0];
+        }
+
+        entries
+    }
 
     fn len(&self) -> usize {
         self.len
